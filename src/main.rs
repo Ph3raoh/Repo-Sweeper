@@ -31,9 +31,9 @@ struct Finding {
 
 fn get_sensitive_patterns() -> HashMap<&'static str, Regex> {
     let mut patterns = HashMap::new();
-    patterns.insert("api_key", Regex::new(r"(?i)(api[_-]?key|apikey|sk-)[=:]\s*[""]?([a-zA-Z0-9_-]{20,})[""]?").unwrap());
-    patterns.insert("password", Regex::new(r"(?i)(password|passwd|pwd)[=:]\s*[""]?([^\s'""]{8,})[""]?").unwrap());
-    patterns.insert("secret", Regex::new(r"(?i)(secret|token)[=:]\s*[""]?([a-zA-Z0-9_-]{20,})[""]?").unwrap());
+    patterns.insert("api_key", Regex::new(r#"(?i)(api[_-]?key|apikey|sk-)[=:]\s*["']?([a-zA-Z0-9_-]{20,})["']?"#).unwrap());
+    patterns.insert("password", Regex::new(r#"(?i)(password|passwd|pwd)[=:]\s*["']?([^\s'\"]{8,})["']?"#).unwrap());
+    patterns.insert("secret", Regex::new(r#"(?i)(secret|token)[=:]\s*["']?([a-zA-Z0-9_-]{20,})["']?"#).unwrap());
     patterns.insert("aws_access_key", Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap());
     patterns.insert("aws_secret_key", Regex::new(r"(?i)([a-zA-Z0-9+/]{40})").unwrap());
     patterns
@@ -92,7 +92,7 @@ async fn scan_repository(repo_url: &str, token: &str) -> Result<(Vec<(String, Ve
     for file in all_files {
         if file.size > 1000000 { continue; }
         if let Some(content) = file.content {
-            let decoded = base64::decode(content)?;
+            let decoded = base64::prelude::BASE64_STANDARD.decode(content)?;
             let text = String::from_utf8(decoded)?;
             let file_findings = scan_file_content(&text, &file.path);
             if !file_findings.is_empty() {
@@ -110,7 +110,7 @@ async fn create_issue(octocrab: &Octocrab, owner: &str, repo_name: &str, finding
     for (file_path, file_findings) in findings {
         body.push_str(&format!("**{}**\n", file_path));
         for finding in file_findings {
-            body.push_str(&format!("- Line {}: {} detected in: `{}`\n", finding.line_num, finding.pattern_type, finding.line));
+            body.push_str(&format!("- Line {}: {} detected in: '{}'\n", finding.line_num, finding.pattern_type, finding.line));
         }
         body.push_str("\n");
     }
@@ -128,7 +128,7 @@ async fn suggest_fix(octocrab: &Octocrab, owner: &str, repo_name: &str, findings
     // Create branch
     let head_commit = repo.head()?.peel_to_commit()?;
     let new_branch_name = "fix-sensitive-data";
-    let mut branch = repo.branch(new_branch_name, &head_commit, false)?;
+    let branch = repo.branch(new_branch_name, &head_commit, false)?;
     let branch_ref = branch.get();
     repo.checkout_tree(&head_commit.as_object(), None)?;
     repo.set_head(branch_ref.name().unwrap())?;
@@ -163,7 +163,7 @@ async fn suggest_fix(octocrab: &Octocrab, owner: &str, repo_name: &str, findings
         let tree = repo.find_tree(tree_id)?;
         let sig = git2::Signature::now("Repo-Sweeper", "bot@example.com")?;
         let commit = repo.commit(Some("HEAD"), &sig, &sig, "Redact sensitive data", &tree, &[&head_commit])?;
-        let remote = repo.find_remote("origin")?;
+        let mut remote = repo.find_remote("origin")?;
         remote.push(&[&format!("refs/heads/{}", new_branch_name)], None)?;
 
         let pr = octocrab.pulls(owner, repo_name).create("Proposed Fixes for Sensitive Data", &format!("{}:{}", owner, new_branch_name), "main").body("This PR redacts detected sensitive data.").send().await?;
@@ -186,7 +186,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         if args.fix {
             match suggest_fix(&octocrab, &owner, &repo_name, &findings, &args.token).await? {
-                Some(pr) => println!("Created PR: {}", pr.html_url),
+                Some(pr) => println!("Created PR: {:?}", pr.html_url),
                 None => println!("No changes made, PR not created."),
             }
         }
